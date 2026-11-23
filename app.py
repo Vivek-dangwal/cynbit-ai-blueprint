@@ -18,8 +18,20 @@ def scrape_site(url: str) -> str:
     body_text = " ".join(soup.get_text(" ", strip=True).split())[:3000]
     return f"URL: {url}\nTitle: {title}\nHeadings: {headings}\nContent: {body_text}"
 
+def get_active_model(client: Groq) -> str:
+    models = [
+        m.id for m in client.models.list().data
+        if "whisper" not in m.id.lower() and "guard" not in m.id.lower() and "tts" not in m.id.lower()
+    ]
+    for preferred in ["llama", "qwen", "gemma", "gpt", "mixtral"]:
+        for m in models:
+            if preferred in m.lower():
+                return m
+    return models[0]
+
 def generate_blueprint(client_input: str, api_key: str) -> dict:
     client = Groq(api_key=api_key)
+    active_model = get_active_model(client)
     system_prompt = """
     You are a Senior AI Solutions Architect at Cynbit Technologies (Jaipur).
     Cynbit's core offerings:
@@ -45,7 +57,7 @@ def generate_blueprint(client_input: str, api_key: str) -> dict:
     }
     """
     completion = client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+        model=active_model,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": client_input}
