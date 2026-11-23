@@ -173,21 +173,27 @@ def scrape_site(url: str) -> str:
     return f"URL: {url}\nTitle: {title}\nHeadings: {headings}\nContent: {body_text}"
 
 
-def get_active_model(client: Groq) -> str:
+def get_ranked_models(client: Groq) -> list:
+    blocked = ["whisper", "guard", "tts", "orpheus", "playai", "compound", "embed", "safeguard"]
     models = [
         m.id for m in client.models.list().data
-        if "whisper" not in m.id.lower() and "guard" not in m.id.lower() and "tts" not in m.id.lower()
+        if not any(b in m.id.lower() for b in blocked)
     ]
-    for preferred in ["llama", "qwen", "gemma", "gpt", "mixtral"]:
+    priority = ["llama-3.3-70b", "llama-3.1-8b", "llama-4", "gpt-oss", "gemma", "llama", "mixtral", "qwen"]
+    ranked = []
+    for p in priority:
         for m in models:
-            if preferred in m.lower():
-                return m
-    return models[0]
+            if p in m.lower() and m not in ranked:
+                ranked.append(m)
+    for m in models:
+        if m not in ranked:
+            ranked.append(m)
+    return ranked
 
 
 def generate_blueprint(client_input: str, api_key: str) -> dict:
     client = Groq(api_key=api_key)
-    active_model = get_active_model(client)
+    ranked_models = get_ranked_models(client)
     system_prompt = """
     You are a Senior AI Solutions Architect at Cynbit Technologies (Jaipur).
     Cynbit's core offerings:
@@ -212,16 +218,24 @@ def generate_blueprint(client_input: str, api_key: str) -> dict:
       "tailored_discovery_brief": "Concise, high-converting strategic overview ready for Cynbit's pre-sales team to send before a discovery call"
     }
     """
-    completion = client.chat.completions.create(
-        model=active_model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": client_input},
-        ],
-        temperature=0.2,
-        response_format={"type": "json_object"},
-    )
-    return json.loads(completion.choices[0].message.content)
+    last_error = None
+    for model_name in ranked_models[:6]:
+        try:
+            completion = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": client_input},
+                ],
+                temperature=0.2,
+                max_tokens=800,
+                response_format={"type": "json_object"},
+            )
+            return json.loads(completion.choices[0].message.content)
+        except Exception as e:
+            last_error = e
+            continue
+    raise last_error
 
 
 # ----------------------------- UI HELPERS -----------------------------
